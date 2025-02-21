@@ -1,18 +1,23 @@
 from fastapi import FastAPI, HTTPException, Depends
 from sqlalchemy import create_engine, Column, Integer, String, Text, ForeignKey, DateTime, func
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
+from pydantic import BaseModel
 import openai
 import os
 
 # Load environment variables (set your OpenAI API key)
-openai.api_key = os.getenv("OPENAI_API_KEY")
+client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # Database setup
-DATABASE_URL = "sqlite:///./chatbot.db"  # Change to 'postgresql://user:pass@localhost/db' for PostgreSQL
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+DATABASE_URL = "postgresql://postgres:Passord@localhost/postgres"  # Change to 'postgresql://user:pass@localhost/db' for PostgreSQL
+engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
+
+
+class ChatRequest(BaseModel):
+    user_message: str
 
 # Models
 class User(Base):
@@ -52,7 +57,8 @@ def get_db():
 
 # Chat Endpoint
 @app.post("/chat")
-def chat(user_message: str, db: Session = Depends(get_db)):
+def chat(request: ChatRequest, db: Session = Depends(get_db)):
+    user_message = request.user_message
     # Check if question is in FAQ
     faq = db.query(FAQ).filter(FAQ.question.ilike(user_message)).first()
     if faq:
@@ -71,13 +77,14 @@ def chat(user_message: str, db: Session = Depends(get_db)):
 
 def call_openai(message: str):
     try:
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
+        response = client.chat.completions.create(
+            model="gpt-4o",
             messages=[{"role": "user", "content": message}]
         )
-        return response["choices"][0]["message"]["content"]
+        print("✅ OpenAI Response:", response)  # Log full response
+        return response.choices[0].message.content
     except Exception as e:
-        print(f"Error calling OpenAI: {e}")
+        print(f"🚨 OpenAI API Error: {e}")  # Log error
         return None
 
 # Fetch Chat History
@@ -102,3 +109,6 @@ def get_faqs(db: Session = Depends(get_db)):
     faqs = db.query(FAQ).all()
     return faqs
 
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
